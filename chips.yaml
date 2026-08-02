@@ -1,0 +1,97 @@
+# Canonical chip vocabulary for esp32-docs-mcp.
+#
+# Every chip listed here is real silicon with support in ESP-IDF: the keys are
+# exactly the target directories under esp-idf/components/soc/. Verified against
+# esp-idf v6.1-dev (055ba9d3f9c) on 2026-07-30.
+#
+# Documentation coverage is tracked separately per corpus, because the two are
+# independent -- a chip can have one without the other, and both gaps are real
+# states rather than missing data:
+#
+# idf_docs: whether ESP-IDF builds documentation for this target, i.e. whether
+#   it appears in esp-idf/docs/conf_common.py's `idf_targets`. False means no
+#   per-chip docs build exists, so no IDF chunks can mention it -- filtering a
+#   search to that chip will only ever return TRM content.
+#
+# trm_folder: the TRM repo's folder name for this chip, or null if no hardware
+#   manual has been published yet.
+#
+# revisions: the silicon-revision manual variants Espressif publishes for this
+#   chip. Almost every chip has exactly one, [mainline]. ESP32-P4 has two, because
+#   a separate "Chip Revision v1.3" manual exists alongside the mainline TRM.
+#   This list is what makes "revision-specific" answerable: a TRM chunk carrying
+#   fewer revisions than its chip declares applies to only some silicon, and a
+#   search result has to say so. A chunk listing [mainline] is revision-specific
+#   for esp32p4 and entirely unremarkable for esp32c3 -- which is exactly why the
+#   set is per-chip rather than global.
+#
+# Current asymmetries worth knowing (they are not errors):
+#   - esp32c61, esp32h2: TRM published, but absent from `idf_targets`, so no
+#     ESP-IDF docs are built for them.
+#   - esp32s31: docs are built, but no TRM has been published.
+#   - esp32h21, esp32h4: neither docs nor TRM yet -- newest additions to
+#     components/soc, referenced in prose only.
+#
+# To re-verify after either upstream moves on: compare these keys against
+# `ls esp-idf/components/soc | grep ^esp32`, idf_docs against conf_common.py's
+# `idf_targets`, and trm_folder against the TRM repo's folder names.
+
+chips:
+  esp32:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: ESP32
+  esp32s2:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: ESP32-S2
+  esp32s3:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: ESP32-S3
+  esp32s31:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: null
+  esp32c2:
+    idf_docs: true
+    revisions: [mainline]
+    # TRM repo folder uses the pre-release codename ESP8684, not "ESP32-C2" --
+    # same chip, different naming convention between the two repos.
+    trm_folder: ESP8684
+  esp32c3:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: ESP32-C3
+  esp32c5:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: ESP32-C5
+  esp32c6:
+    idf_docs: true
+    revisions: [mainline]
+    trm_folder: ESP32-C6
+  esp32c61:
+    idf_docs: false
+    revisions: [mainline]
+    trm_folder: ESP32-C61
+  esp32h2:
+    idf_docs: false
+    revisions: [mainline]
+    trm_folder: ESP32-H2
+  esp32h21:
+    idf_docs: false
+    revisions: [mainline]
+    trm_folder: null
+  esp32h4:
+    idf_docs: false
+    revisions: [mainline]
+    trm_folder: null
+  esp32p4:
+    idf_docs: true
+    # Espressif publishes two P4 manuals: the mainline TRM and a separate
+    # "Chip Revision v1.3" one, selected by the ESP32-P4-latest tag. Their
+    # register sets diverge both ways (48 registers only in v1.3, 60 only in
+    # mainline), so both are ingested and deduplicated -- see LATEX.md.
+    revisions: [mainline, v1.3]
+    trm_folder: ESP32-P4
