@@ -130,13 +130,12 @@ descriptions. Two consequences:
   `_split_paragraphs_with_refs` honours it. The IDF side benefits too — API
   `desc` blocks have identical semantics.
 
-  This is **not** a theoretical safeguard. An earlier draft of this document
-  claimed every register fits under the cap, so atomicity would rarely fire —
-  that was wrong, and wrong for the familiar reason: the size table below was
-  measured over the `__EN.tex` subset. **28 registers exceed 400 words on their
-  own** (largest 518, not the 497 stated below) and hit the splitter directly.
-  Verified by a control: `UART_CONF0_REG` (448 words, `ESP32/19-UART__EN.tex`)
-  survives whole with the flag and is cut without it.
+  This is **not** a theoretical safeguard, and the size table below understates
+  the case because it is measured over the `__EN.tex` subset only. **28 registers
+  exceed 400 words on their own** — largest 518, above the 497 the table reports
+  — and reach the splitter directly. Confirmed by a control: `UART_CONF0_REG`
+  (448 words, `ESP32/19-UART__EN.tex`) survives whole with the flag and is cut
+  without it. Do not remove `atomic` as unnecessary complexity.
 - **Merging adjacent registers is fine.** At p50 36 words they fall below
   `MIN_WORDS_PER_CHUNK`, so `merge_undersized_chunks` will group them. That is
   desirable: consecutive registers belong to one peripheral and share context.
@@ -334,8 +333,10 @@ has exactly one `\begin{document}`, always unconditional and after the single
 `\fi`. The conditional's branches contain only `\documentclass`, `\usepackage`,
 `\myexternaldocument` and comments. Skipping the preamble is safe.
 
-**But `\iftagged` DOES gate content — this document previously claimed otherwise
-and was wrong.** `\iftagged{<TAG>}{<true>}{<false>}` (etoolbox) selects between
+**`\ifglobal` is not the only conditional, and `\iftagged` DOES gate content.**
+Auditing `\ifglobal` alone gives a clean result and the false impression that
+the corpus has no content branching — check both before concluding either way.
+`\iftagged{<TAG>}{<true>}{<false>}` (etoolbox) selects between
 alternative content at build time. Verified in English files: **169 occurrences
 across 48 files** — ESP32-P4 127, ESP32-H2 21, ESP32-C5 18, every other chip 0 —
 and **9 of them wrap a `\begin{register}`**. Example, from
@@ -465,15 +466,15 @@ and about `\tagged` with an inactive tag. Until then the census will keep
 reporting 76.9% for the two AES chapters and 93.3% for `ESP32-H2/33-USBSERIALJTAG`,
 and that is the expected reading rather than a regression.
 
-**A cautionary note on how this was originally diagnosed.** An earlier version of
-this section claimed the six AES registers failed to render because their names
-contain nested braces (`\regindex{n}`). That was wrong. The registers render
-correctly and always did — `Register AES_KEY_n_REG (n: 0-7) at address
-0x0000+4*n`. The "evidence" was a regex, `Register (AES_[^\s]+) at address`,
-which cannot match a register name containing a space, so every parameterised
-register looked absent. Nested-brace parsing works fine throughout; pylatexenc
-returns all three arguments intact. When a check says content is missing,
-confirm the *check* before writing down a cause.
+**Matching register names needs care, and getting it wrong looks like content
+loss.** Register names in this corpus routinely contain spaces and parentheses —
+`Register AES_KEY_n_REG (n: 0-7) at address 0x0000+4*n`. A pattern like
+`Register (AES_[^\s]+) at address` therefore matches nothing for any
+parameterised register, and reports the ~1,156 of them as absent when they render
+perfectly. Nested-brace parsing works throughout; pylatexenc returns all three
+`\begin{register}` arguments intact. When a check reports missing content,
+validate the check against a register known to be present before concluding
+anything about the parser.
 
 ## Fixed: line-wrapped register headers
 

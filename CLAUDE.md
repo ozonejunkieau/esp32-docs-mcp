@@ -261,10 +261,14 @@ to both revisions, 162 mainline-only, 142 v1.3-only.
 artifact, not content loss**: 6 sit inside `\iffalse … \fi` and 2 inside
 `\tagged{ESP32-H21}` — content for a different chip. `latex_parser` evaluates
 both constructs and is right to exclude them; `trm_verify` does not, so it
-overcounts. See `LATEX.md`, which also records how this was originally
-*misdiagnosed* — a regex that couldn't match register names containing spaces
-made correctly-rendered registers look absent. Confirm the check before believing
-the finding.
+overcounts.
+
+**Confirm a check before believing its finding.** Register names here routinely
+contain spaces and parentheses (`AES_KEY_n_REG (n: 0-7)`), so a pattern like
+`Register (AES_[^\s]+) at address` silently matches none of the ~1,156
+parameterised registers and reports them as lost when they render perfectly.
+Validate any missing-content check against an item known to be present. See
+`LATEX.md`.
 
 Two register counts, both correct: `register_census.py source` reports **13,707**
 (raw `\begin{register}`, pre-tag-selection); the parser emits **13,597** after
