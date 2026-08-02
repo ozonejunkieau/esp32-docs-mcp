@@ -1,0 +1,34 @@
+[project]
+name = "esp32-docs-mcp"
+version = "0.1.0"
+description = "Local MCP server giving coding agents semantic search over ESP-IDF documentation and the ESP32 Technical Reference Manuals."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "ozonejunkieau" }]
+requires-python = ">=3.12"
+keywords = ["esp32", "esp-idf", "mcp", "model-context-protocol", "embeddings", "lancedb", "mlx"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Software Development :: Embedded Systems",
+]
+dependencies = [
+    "docutils>=0.23",
+    "hf>=1.24.0",
+    "lancedb>=0.34.0",
+    "mcp>=1.28.1",
+    "mlx-embeddings>=0.1.0",
+    "pydantic>=2.13.4",
+    "pylatexenc>=2.10",
+    "typer>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ozonejunkieau/esp32-docs-mcp"
+Repository = "https://github.com/ozonejunkieau/esp32-docs-mcp"
+Issues = "https://github.com/ozonejunkieau/esp32-docs-mcp/issues"

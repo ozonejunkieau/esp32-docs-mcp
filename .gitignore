@@ -1,0 +1,67 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Secrets and local config ---
+# Nothing here needs credentials today, but an ignored .env is cheap insurance
+# against one arriving later and being committed by reflex.
+.env
+.env.*
+!.env.example
+
+# --- Generated corpus artifacts ---
+# All reproducible from an ESP-IDF checkout and the TRM LaTeX sources via
+# build_idf_docs.sh -> ingest_sphinx_xml.py -> dedup_chunks.py -> embed_and_store.py
+# (and ingest_trm.py for the manuals). Deliberately not committed: the LanceDB
+# store is several hundred MB of vectors (413MB at last measure) that git would
+# keep forever and cannot delta-compress -- and Lance rewrites fragments rather
+# than appending, so every re-embed would add another full copy to history. It is
+# also invalidated wholesale by any change to the chunker, the embedding model, or
+# upstream docs. Every row records source_version/source_commit, so the corpus is
+# reproducible rather than merely re-downloadable -- which is what makes leaving
+# it out safe. See docs/building-the-corpus.md.
+esp_docs.lancedb/
+demo.lancedb/
+*.jsonl
+
+# --- Local checkout symlink ---
+# Points at a TRM LaTeX clone by absolute path, so it is neither portable nor
+# free of the local username. Set TRM_PATH instead, or recreate the symlink.
+trm_latex
+
+# --- Logs and scratch ---
+*.log
+
+# --- Editors and local agent config ---
+# settings.local.json is per-machine and often carries local paths; it is only
+# covered by a global gitignore on this machine, so name it explicitly here or it
+# lands in anyone else's clone.
+.claude/settings.local.json
+.idea/
+.vscode/
+*.swp
+*~
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
