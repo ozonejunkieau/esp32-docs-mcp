@@ -12,21 +12,25 @@ Being independent means being approximate: text extraction here strips macros
 crudely, which is fine because every check built on it compares ratios between
 files rather than trusting an absolute figure.
 
-KNOWN LIMITATION -- `expand_document` does not evaluate conditionals, so it
-counts source the parser is right to exclude, and register censuses read ~8
-registers low as a result:
+`expand_document` evaluates the two constructs that genuinely gate content --
+`\\iffalse ... \\fi` and `\\tagged`/`\\untagged`/`\\iftagged` -- because counting
+source the parser is right to exclude reads as content loss. It used to skip
+both, which cost the census 8 registers: six inside `\\iffalse` in the ESP32-C3
+and ESP32-S3 AES register files, and two inside `\\tagged{ESP32-H21}` (a
+different chip) in ESP32-H2/33-USBSERIALJTAG. The evaluation here is written
+from the LaTeX semantics rather than shared with latex_parser, so the two
+agreeing is evidence rather than tautology.
 
-  - `\\iffalse ... \\fi` blocks (deliberately disabled upstream). Six registers
-    across ESP32-C3/24-AES and ESP32-S3/30-AES.
-  - `\\tagged{<TAG>}{...}` with an inactive tag, i.e. content belonging to a
-    different chip. Two registers in ESP32-H2/33-USBSERIALJTAG carrying
-    `\\tagged{ESP32-H21}`.
+The active tag set is derived from the sources the same way a build does: the
+chip's own `\\chipname` (which `\\usetag{\\chipseries}` in
+00-shared/config/preamble-trm-repo.sty activates) plus whatever each aggregator
+document declares with `\\usetag`. Since ingest_trm parses *every* revision
+variant of a chip and merges the results, a tag only some variants activate --
+`ESP32-P4-latest` -- leaves both branches in the corpus, so both are counted;
+see `TagContext`.
 
-So `register_census.py check` reports 76.9% for those two AES chapters and 93.3%
-for that H2 chapter on a correct ingest. That is the expected reading, not a
-regression. Teaching this module the two constructs would take the census to a
-true 100% -- worth doing, and worth doing *here* rather than by importing
-latex_parser, which would forfeit the independence the module exists for.
+`\\ifglobal` is deliberately left alone: it lives entirely in the preamble that
+`document_body` already discards, and its branches hold no content.
 """
 
 from __future__ import annotations
@@ -106,6 +110,256 @@ def document_body(text: str) -> str:
     return text
 
 
+# --------------------------------------------------------------------------
+# Conditionals: which of a file's text a build of this manual actually keeps.
+# --------------------------------------------------------------------------
+
+# \newcommand\chipname{ESP32-H2} in <CHIP>/00-chip-spec-content/chip-spec-settings.sty.
+# Read rather than assumed from the directory name so a chip whose folder is
+# named for the marketing part (ESP8684) still gets the tag its build uses.
+_CHIPNAME_RE = re.compile(r"\\newcommand\s*\\chipname\s*\{([^}]*)\}")
+_USETAG_RE = re.compile(r"\\usetag\s*\{([^}]*)\}")
+
+# \chipseries expands to \chipname; both are spellings of "this chip's tag".
+_CHIP_TAG_MACROS = {"chipseries", "chipname"}
+
+# A control sequence: a word, or a single non-letter (\\, \_, \%). Matching the
+# second form matters -- \\ is a line break, and reading its trailing backslash
+# as the start of the next control word would let "\\iffalse" fire on text that
+# is really a break followed by a word.
+_CS_RE = re.compile(r"\\(?:([A-Za-z]+)\*?|(.))", re.DOTALL)
+
+# TeX skips an unselected conditional by token, counting only *primitive*
+# conditionals towards nesting. These all begin "if" but are ordinary macros
+# (etoolbox, ifthen, the tagging package), so they consume no \fi and must not
+# be counted when scanning for the \fi that closes an \iffalse.
+_NON_PRIMITIVE_IFS = frozenset(
+    {
+        "iftagged",
+        "ifthenelse",
+        "iflabelexists",
+        "iftoggle",
+        "ifbool",
+        "ifboolexpr",
+        "ifblank",
+        "ifdef",
+        "ifcsdef",
+        "ifcsundef",
+        "ifdefstring",
+        "ifdefempty",
+        "ifdefvoid",
+        "ifstrequal",
+        "ifnumcomp",
+        "ifnumequal",
+    }
+)
+
+_TAG_MACROS = frozenset({"tagged", "untagged", "iftagged"})
+
+# Tag states. A tag is ALWAYS active if every variant of the manual declares it,
+# SOMETIMES if only some do, NEVER if none.
+_ALWAYS, _SOMETIMES, _NEVER = "always", "sometimes", "never"
+
+
+class TagContext(BaseModel):
+    """The tags a manual's builds activate, and how consistently.
+
+    One chip can ship several manuals -- ESP32-P4 has a mainline one and a
+    chip-revision-v1.3 one -- and ingest_trm parses every variant and merges the
+    output, so the corpus holds the *union* of what any variant emits. The
+    source side has to be counted the same way or the comparison is not
+    like-for-like. Hence three states rather than a flat active/inactive set:
+    `ESP32-P4-latest` is declared by one variant and not the other, so both
+    branches of a conditional on it end up in the corpus and both are counted,
+    while `ESP32-H21` is declared by no ESP32-H2 build and its content is
+    correctly dropped.
+    """
+
+    chip_name: str
+    always: frozenset[str] = frozenset()
+    sometimes: frozenset[str] = frozenset()
+
+    def state_of(self, taglist: str) -> str:
+        """Evaluate a `\\tagged`-style argument, which may be a comma list.
+
+        The tagging package treats the list as a disjunction, so one active tag
+        selects the content. A tag written as an unresolvable macro is treated
+        as SOMETIMES -- keeping both branches is the conservative reading, and
+        the alternative would silently drop content on a macro we failed to
+        expand.
+        """
+        state = _NEVER
+        for raw in taglist.split(","):
+            tag = raw.strip()
+            if not tag:
+                continue
+            if tag.startswith("\\"):
+                name = tag.lstrip("\\").rstrip("{}").strip()
+                if name in _CHIP_TAG_MACROS:
+                    tag = self.chip_name
+                else:
+                    return _SOMETIMES
+            if tag in self.always:
+                return _ALWAYS
+            if tag in self.sometimes:
+                state = _SOMETIMES
+        return state
+
+
+def _chip_name(chip_dir: Path) -> str:
+    settings = chip_dir / "00-chip-spec-content" / "chip-spec-settings.sty"
+    try:
+        match = _CHIPNAME_RE.search(settings.read_text(errors="replace"))
+    except OSError:
+        return chip_dir.name
+    return match.group(1).strip() if match else chip_dir.name
+
+
+def tag_context(chip_dir: Path) -> TagContext:
+    """Derive the tag states of a manual from its aggregator documents.
+
+    Aggregators are the unnumbered `*__EN.tex` at the top of a chip directory --
+    the documents that actually get compiled into a PDF, and the only place
+    `\\usetag` is written. Reading them means a new revision manual appearing
+    upstream is picked up without editing this file.
+    """
+    name = _chip_name(chip_dir)
+    variants: list[set[str]] = []
+    for path in sorted(chip_dir.glob("*__EN.tex")):
+        if _CHAPTER_RE.match(path.name):
+            continue
+        try:
+            text = strip_comments(path.read_text(errors="replace"))
+        except OSError:
+            continue
+        tags = {name}
+        for arg in _USETAG_RE.findall(text):
+            for raw in arg.split(","):
+                tag = raw.strip()
+                if tag.startswith("\\"):
+                    # \usetag{\chipseries} -- the chip's own name, already added.
+                    continue
+                if tag:
+                    tags.add(tag)
+        variants.append(tags)
+
+    if not variants:
+        variants = [{name}]
+    always = frozenset(set.intersection(*variants))
+    sometimes = frozenset(set.union(*variants) - always)
+    return TagContext(chip_name=name, always=always, sometimes=sometimes)
+
+
+def _skip_to_fi(text: str, start: int) -> tuple[str, int]:
+    """Consume a false conditional's body, returning the surviving text and offset.
+
+    Nesting is counted over primitive conditionals only (see
+    _NON_PRIMITIVE_IFS). An `\\else` at depth one ends the dead branch, and what
+    follows up to the matching `\\fi` is live and returned to be processed.
+    """
+    depth = 1
+    i = start
+    live_from: int | None = None
+    while i < len(text):
+        j = text.find("\\", i)
+        if j < 0:
+            break
+        match = _CS_RE.match(text, j)
+        if match is None:
+            i = j + 1
+            continue
+        i = match.end()
+        name = match.group(1)
+        if name is None:
+            continue
+        if name == "fi":
+            depth -= 1
+            if depth == 0:
+                return (text[live_from : match.start()] if live_from is not None else ""), i
+        elif name == "else" and depth == 1 and live_from is None:
+            live_from = i
+        elif name.startswith("if") and name not in _NON_PRIMITIVE_IFS:
+            depth += 1
+    # Unterminated \iffalse: dropping the rest of the file on a malformed source
+    # would look exactly like the content loss this module exists to detect, so
+    # keep what came after instead.
+    return text[start:], len(text)
+
+
+def apply_conditionals(text: str, tags: TagContext) -> str:
+    """Resolve `\\iffalse` and tag selection, leaving everything else untouched.
+
+    Selection has to happen before includes are followed: a `\\subfile` inside a
+    dead branch names a file this manual never compiles, and following it would
+    pull a whole chapter of another chip's registers into the census.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        j = text.find("\\", i)
+        if j < 0:
+            out.append(text[i:])
+            break
+        out.append(text[i:j])
+        match = _CS_RE.match(text, j)
+        if match is None:
+            out.append(text[j:])
+            break
+        name = match.group(1)
+        if name == "iffalse":
+            kept, i = _skip_to_fi(text, match.end())
+            out.append(apply_conditionals(kept, tags))
+            continue
+        if name in _TAG_MACROS:
+            consumed = _select_tagged(text, name, match.end(), tags)
+            if consumed is not None:
+                kept, i = consumed
+                out.append(apply_conditionals(kept, tags))
+                continue
+        out.append(match.group(0))
+        i = match.end()
+    return "".join(out)
+
+
+def _select_tagged(text: str, name: str, pos: int, tags: TagContext) -> tuple[str, int] | None:
+    """Read one tag macro's arguments and return (surviving text, offset after it).
+
+    Returns None if the arguments don't parse, so the caller can leave the
+    source as it found it rather than guessing where the macro ended.
+
+    Two `\\iftagged` in the corpus (ESP32-C5/42-PARLIO-reg__EN.tex:338 and the
+    ESP32-P4-latest one it mirrors) are written with only two arguments, as if
+    they were `\\tagged`. Reading the following `\\begin{register}` as the else
+    branch would be worse than useless, so a missing third argument is taken as
+    an empty one -- which is what the author wrote them to mean.
+    """
+    arity = 3 if name == "iftagged" else 2
+    args: list[str] = []
+    for index in range(arity):
+        read = _balanced_arg(text, pos)
+        if read is None:
+            if name == "iftagged" and index == 2:
+                args.append("")
+                break
+            return None
+        arg, pos = read
+        args.append(arg)
+
+    state = tags.state_of(args[0])
+    if name == "tagged":
+        return ("" if state == _NEVER else args[1]), pos
+    if name == "untagged":
+        return ("" if state == _ALWAYS else args[1]), pos
+    # \iftagged{tag}{yes}{no}: a SOMETIMES tag selects each branch in some
+    # variant, so the merged corpus contains both and both are kept.
+    kept = []
+    if state != _NEVER:
+        kept.append(args[1])
+    if state != _ALWAYS:
+        kept.append(args[2])
+    return "\n".join(kept), pos
+
+
 class ExpandedDoc(BaseModel):
     """One chapter with every \\subfile/\\input resolved and concatenated."""
 
@@ -125,14 +379,23 @@ def expand_document(path: Path, chip_dir: Path, root: Path) -> ExpandedDoc:
     author found natural; shared front matter resolves out of 00-trm-shared.
     Unresolved includes are collected rather than raised -- an ingest that loses
     one file should show up as a shortfall, not as a crash.
+
+    Dead conditional branches are removed as each file is read, so neither their
+    text nor the files they include reach the result.
     """
     doc = ExpandedDoc(path=path)
-    _expand_into(path, chip_dir, root, {}, set(), doc)
+    _expand_into(path, chip_dir, root, {}, set(), doc, tag_context(chip_dir))
     return doc
 
 
 def _expand_into(
-    path: Path, chip_dir: Path, root: Path, defs: dict[str, str], seen: set[Path], doc: ExpandedDoc
+    path: Path,
+    chip_dir: Path,
+    root: Path,
+    defs: dict[str, str],
+    seen: set[Path],
+    doc: ExpandedDoc,
+    tags: TagContext,
 ) -> None:
     path = path.resolve()
     if path in seen:  # cycle guard; a shared fragment included twice counts once
@@ -140,7 +403,7 @@ def _expand_into(
     seen.add(path)
 
     try:
-        body = document_body(path.read_text(errors="replace"))
+        body = apply_conditionals(document_body(path.read_text(errors="replace")), tags)
     except OSError:
         doc.missing.append(str(path))
         return
@@ -158,7 +421,7 @@ def _expand_into(
         if resolved is None:
             doc.missing.append(target)
             continue
-        _expand_into(resolved, chip_dir, root, defs, seen, doc)
+        _expand_into(resolved, chip_dir, root, defs, seen, doc, tags)
 
 
 def _substitute_defs(arg: str, defs: dict[str, str]) -> str:

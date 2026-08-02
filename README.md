@@ -74,6 +74,10 @@ uv run validate_store.py     # row count, doc_type breakdown, search round-trip
 uv run mcp_server.py         # speaks stdio; Ctrl-C to stop
 ```
 
+If you have [`just`](https://just.systems) (>= 1.43), every command in the
+documentation has a recipe — `just` on its own lists them, grouped, and
+`just --list` records what a healthy result from each check looks like.
+
 Register with Claude Code:
 
 ```bash
@@ -105,9 +109,9 @@ the results.
 | Parameter | Description |
 |---|---|
 | `query` | Natural-language query, e.g. "how does I2S clock configuration work" |
-| `doc_type` | `trm`, `idf`, or omit for both |
+| `doc_type` | `trm`, `idf`, or omit for both. A third value, `src`, is reserved for the ESP-IDF SoC-header corpus that is landing |
 | `chip` | e.g. `esp32p4`. Narrows to what's true for that chip; content common to all chips still matches |
-| `revision` | Silicon revision, e.g. `v1.3` or `mainline`. Narrows TRM content only; ESP-IDF content has no revision axis and is unaffected. Omit to see every revision |
+| `revision` | Silicon revision, e.g. `v1.3` or `mainline`. Narrows any content that has a revision — the manuals, and ESP32-P4's SoC register headers. Content without one is unaffected. Omit to see every revision |
 | `k` | Results to return (1–20, default 5) |
 
 Returns JSON. Each result carries its text plus `source_doc`, `section_path`,
@@ -153,10 +157,11 @@ plainly:
   *only* as a figure, but the diagrams themselves are absent.
 - **TRM chunks have no `doc_refs`.** Cross-reference extraction is implemented
   for the ESP-IDF corpus only; it is deferred, not broken.
-- **`register_census.py check` reports 8 missing registers, and that is
-  correct.** They sit inside `\iffalse` blocks or are tagged for another chip;
-  the parser is right to drop them and the checker does not evaluate those
-  constructs. See [LATEX.md](LATEX.md).
+- **A register census shortfall is not automatically content loss.** Some source
+  registers are disabled upstream or tagged for a different chip, and the parser
+  is right to drop them while an independent checker may still count them. Read
+  the named registers before treating a shortfall as a regression — see
+  [docs/trm-latex.md](docs/trm-latex.md#verification).
 
 ## Documentation
 
@@ -164,8 +169,10 @@ plainly:
 |---|---|
 | [docs/usage.md](docs/usage.md) | Wiring the server in, querying it, reading results, troubleshooting |
 | [docs/building-the-corpus.md](docs/building-the-corpus.md) | Building and refreshing the index from source |
-| [CLAUDE.md](CLAUDE.md) | Architecture, invariants, and the traps that cost time |
-| [LATEX.md](LATEX.md) | TRM LaTeX ingest — design record and verification |
+| [docs/architecture.md](docs/architecture.md) | Why the pipelines are shaped this way; what was tried and deleted |
+| [docs/trm-latex.md](docs/trm-latex.md) | TRM LaTeX ingest — design record and verification |
+| [docs/development.md](docs/development.md) | The `justfile`, the tests, the fixtures |
+| [CLAUDE.md](CLAUDE.md) | Operating guide: invariants, environment traps, commands, current state |
 
 ## Layout
 
@@ -181,13 +188,16 @@ plainly:
 | `embedder.py` | Qwen3-Embedding-4B via MLX (2560 dims) |
 | `schema.py` | The stored chunk schema |
 | `chips.yaml`, `chip_vocab.py` | Verified chip vocabulary and doc coverage |
-| `latex_parser.py`, `latex_coverage_check.py` | TRM LaTeX parsing — see `LATEX.md` |
+| `latex_parser.py`, `latex_coverage_check.py` | TRM LaTeX parsing and macro-coverage reporting — see [docs/trm-latex.md](docs/trm-latex.md) |
 | `ingest_trm.py` | Chunks the TRM manuals, deduplicated across silicon revisions |
+| `ingest_source.py` | Chunks the ESP-IDF SoC headers (`doc_type = "src"`) |
 | `provenance.py`, `backfill_provenance.py` | Record/repair the upstream revision each chunk came from |
 | `check_thin_files.py` | Thin-file and capture-rate checks (`xml` / `latex`) |
 | `register_census.py`, `trm_verify.py` | Check TRM registers survive into chunks |
 | `make_trm_fixture.py` | Synthetic corpora that prove the checkers work |
 | `validate_store.py` | LanceDB row count, samples, search round-trip |
+| `justfile` | Every documented command as a recipe; `just --list` |
+| `tests/` | `uv run pytest`; `slow` tests need a local corpus and skip without one |
 
 ## License
 

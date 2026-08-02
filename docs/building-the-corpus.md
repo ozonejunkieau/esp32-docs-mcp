@@ -4,7 +4,8 @@ There is no prebuilt index to download. The store is derived data — every row
 records the upstream commit it came from — so building it locally is what makes
 it trustworthy rather than merely available.
 
-Two independent pipelines write into one LanceDB table:
+Two independent pipelines write into one LanceDB table (a third, for the ESP-IDF
+SoC headers, is [landing](#a-third-corpus-esp-idf-soc-headers)):
 
 ```
 ESP-IDF repo ──build_idf_docs.sh──▶ Sphinx XML (per target)
@@ -23,6 +24,12 @@ TRM LaTeX repo ──ingest_trm.py──▶ trm_chunks.jsonl ─┤
 Each stage writes a file the next stage reads, so any stage can be re-run without
 redoing the ones before it. Embedding is by far the most expensive step; it is
 last, and its input is reproducible.
+
+Every command below has a `just` recipe, listed alongside it. The recipes are
+the authoritative spelling — several flags are load-bearing — and `just --list`
+also records what a healthy result from each check looks like. See
+[development.md](development.md) for the full recipe reference and for the
+guards on the two destructive ones.
 
 ## Cost, before you start
 
@@ -82,21 +89,22 @@ The tools resolve it in this order:
 ## ESP-IDF pipeline
 
 ```bash
-# 1. Build the docs to docutils XML (3 targets in parallel).
+# 1. Build the docs to docutils XML (3 targets in parallel).      just build-idf-docs
 #    Output: $IDF_PATH/docs/_build/en/<target>/xml/
 export IDF_PATH=~/git/esp-idf
 ./build_idf_docs.sh esp32 esp32s2 esp32s3 esp32s31 esp32c2 esp32c3 esp32c5 esp32c6 esp32p4
 
-# 2. Chunk each target's build.
+# 2. Chunk each target's build.                                   just chunk-idf
 for chip in esp32 esp32s2 esp32s3 esp32s31 esp32c2 esp32c3 esp32c5 esp32c6 esp32p4; do
     uv run ingest_sphinx_xml.py "$IDF_PATH/docs/_build/en/$chip/xml" \
         --chip "$chip" --out-path "chunks_$chip.jsonl"
 done
 
-# 3. Collapse chunks identical across chips into one row each.
+# 3. Collapse chunks identical across chips into one row each.    just dedup-idf
 uv run dedup_chunks.py chunks_*.jsonl --out-path idf_chunks.jsonl
 
 # 4. Embed and store. --overwrite recreates the table -- see the warning below.
+#                                     just embed-idf-fresh confirm=rebuild-whole-store
 uv run embed_and_store.py idf_chunks.jsonl --doc-type idf --overwrite \
     --source-repo "$IDF_PATH"
 ```
@@ -121,8 +129,9 @@ without re-embedding.
 ## TRM pipeline
 
 ```bash
-uv run ingest_trm.py --out-path trm_chunks.jsonl
-uv run embed_and_store.py trm_chunks.jsonl --doc-type trm --source-repo ./trm_latex
+uv run ingest_trm.py --out-path trm_chunks.jsonl                          # just chunk-trm
+uv run embed_and_store.py trm_chunks.jsonl --doc-type trm \
+    --source-repo "$TRM_PATH"                                             # just embed-trm
 ```
 
 **No `--overwrite` on that second command** — the TRM rows append alongside the
@@ -135,25 +144,40 @@ results, so a chunk appears once carrying every revision it applies to. Current
 output: **10,515 chunks across ten manuals**, with ESP32-P4 splitting into 2,394
 chunks common to both revisions, 162 mainline-only and 142 v1.3-only.
 
+## A third corpus: ESP-IDF SoC headers
+
+`ingest_source.py` chunks the ESP-IDF SoC headers under `components/soc/` as
+`doc_type = "src"` — the C counterpart to the manuals, where the TRM *describes*
+a register and the header *defines* its address and bitmasks. It reads
+`$IDF_PATH` (falling back to `~/git/esp-idf`) and writes JSONL like the other
+two ingests, so it embeds through the same `embed_and_store.py`. `src` rows are
+chip-scoped through the `chips` **list**, like ESP-IDF rows, and carry no
+`revisions`.
+
+> **Not yet documented here.** The scope flags, their measured cost, and the
+> matching `just` recipes are pending — see `uv run ingest_source.py --help` and
+> the module docstring in the meantime. Do not quote a corpus size for it from
+> memory; measure it.
+
 ## Verify before you trust it
 
-Aggregate counts do not catch silent content loss — both real content-loss bugs
-in this project were invisible in totals and were found only by comparing
+Aggregate counts do not catch silent content loss — every content-loss bug this
+project has had was invisible in totals and was found only by comparing
 extracted text against the source. Run the checkers after every ingest.
 
 ```bash
 # Store-level: row count, doc_type breakdown, samples, search round-trip.
-uv run validate_store.py
+uv run validate_store.py                                          # just validate
 
 # ESP-IDF: files that produced suspiciously few chunks, or captured a low share
 # of their source's words.
 uv run check_thin_files.py xml chunks_esp32p4.jsonl \
-    --xml-root "$IDF_PATH/docs/_build/en/esp32p4/xml"
+    --xml-root "$IDF_PATH/docs/_build/en/esp32p4/xml"              # just check-idf-thin
 
-# TRM: same idea, plus the register census.
-uv run check_thin_files.py latex trm_chunks.jsonl
-uv run register_census.py source                  # source-side census only
-uv run register_census.py check trm_chunks.jsonl  # census vs. chunk output
+# TRM: same idea, plus the register census.                        just verify-trm
+uv run check_thin_files.py latex trm_chunks.jsonl                 # just check-trm-thin
+uv run register_census.py source                                  # just census-source
+uv run register_census.py check trm_chunks.jsonl                  # just census-check
 ```
 
 `register_census.py source` currently reports **13,707** registers across 379
@@ -163,15 +187,45 @@ unselected branches and is correct. A count near **11,539** is the real alarm:
 that means includes are being filtered by `__EN` filename, which drops 1,476
 registers living in lowercase `_en.tex` files.
 
-`register_census.py check` reports **8 registers missing** on a good ingest and
-that is the expected reading, not a regression. Six sit inside `\iffalse` blocks
-and two are tagged for a different chip; the parser is right to exclude them and
-the checker does not evaluate those constructs. Details in [../LATEX.md](../LATEX.md).
+`register_census.py check` compares that source census against the chunk output,
+per chip, and exits non-zero past a shortfall threshold. **A small shortfall is
+not automatically content loss**: some source registers are disabled upstream
+inside `\iffalse` or tagged for a different chip, and the parser is right to drop
+them while the checker may still count them. Read the named registers before
+treating a shortfall as a regression — see
+[trm-latex.md](trm-latex.md#verification), which also records the expected
+reading.
 
-The checkers themselves are testable — `make_trm_fixture.py` synthesises a
-faithful corpus and a deliberately broken one from the real LaTeX, and both
-checkers must tell them apart. Regenerate and re-run both after changing either
-checker; see [../CLAUDE.md](../CLAUDE.md) for the measured discrimination.
+### Macro coverage
+
+`latex_coverage_check.py` reports every LaTeX macro and environment used in the
+TRM sources that the parser does not explicitly handle, most frequent first. It
+takes the **directory to scan as a required positional argument**, so it works
+on one chip or on the whole repo:
+
+```bash
+uv run latex_coverage_check.py "$TRM_PATH"                        # just latex-coverage
+uv run latex_coverage_check.py "$TRM_PATH/ESP32-C3"               # one chip
+uv run latex_coverage_check.py "$TRM_PATH" --top-n 60             # default is 40
+```
+
+Run it after pulling new TRM sources, and after any change to `latex_parser.py`.
+A macro appearing more than ~50 times and still unknown is worth investigating;
+most of what remains is correctly ignorable. What "normal" currently looks like,
+and how to read the report, is in
+[trm-latex.md](trm-latex.md#macro-coverage).
+
+### The checkers themselves
+
+`make_trm_fixture.py` synthesises a faithful corpus and a deliberately broken one
+from the real LaTeX, and both checkers must tell them apart:
+
+```bash
+just fixtures-verify
+```
+
+Regenerate and re-run after changing either checker. The expected readings are in
+`just --list` and in [development.md](development.md#fixtures--proving-the-checkers-still-discriminate).
 
 ## Refreshing
 
@@ -190,37 +244,52 @@ because it will take the other half with it.
   fixes the vector width at table creation.
 
 - **Only one corpus moved.** Delete that `doc_type`'s rows, then append the new
-  ones. No script wraps this; it is two lines of LanceDB:
+  ones:
 
   ```bash
-  uv run python -c "
-  import lancedb
-  t = lancedb.connect('./esp_docs.lancedb').open_table('chunks')
-  t.delete(\"doc_type = 'idf'\")
-  print(t.count_rows(), 'rows remain')
-  "
-  uv run embed_and_store.py idf_chunks.jsonl --doc-type idf --source-repo \"\$IDF_PATH\"
+  just delete-corpus idf        # prompts, then prints the remaining row count
+  just embed-idf-append
   ```
 
-  Substitute `'trm'` and `trm_chunks.jsonl` for the other direction. Confirm the
-  remaining row count matches the corpus you meant to keep *before* embedding
-  anything.
+  The delete is a few lines of LanceDB if you would rather run it directly:
+
+  ```bash
+  uv run python - <<'PY'
+  import lancedb
+  t = lancedb.connect("./esp_docs.lancedb").open_table("chunks")
+  t.delete("doc_type = 'idf'")
+  print(t.count_rows(), "rows remain")
+  PY
+
+  uv run embed_and_store.py idf_chunks.jsonl --doc-type idf --source-repo "$IDF_PATH"
+  ```
+
+  Substitute `'trm'`, `trm_chunks.jsonl` and `"$TRM_PATH"` for the other
+  direction. Confirm the remaining row count matches the corpus you meant to
+  keep *before* embedding anything.
 
 - **Only provenance is wrong** — rows embedded without `--source-repo`.
   `backfill_provenance.py <source-repo>` stamps them without recomputing a single
-  embedding, which is seconds instead of hours. It has a `--dry-run`.
+  embedding, which is seconds instead of hours. It has a `--dry-run`; use it.
 
-  It works on a table that came from **one** ingest. On a table that already
-  mixes both corpora it refuses, because the two have different upstreams and one
-  constant expression cannot stamp them differently:
+  ```bash
+  # or: just backfill-provenance "$IDF_PATH" --doc-type idf --dry-run
+  uv run backfill_provenance.py "$IDF_PATH" --doc-type idf --dry-run
+  ```
+
+  It stamps one constant revision across the rows it touches, which is only
+  correct for a table that came from **one** ingest. **On a table that mixes
+  corpora, pass `--doc-type`** — that is the guard, and it refuses rather than
+  stamping half the table with the wrong upstream:
 
   ```
   11157 rows have a different doc_type and would be stamped with the wrong revision.
   Refusing. Stamp each corpus before mixing them, or extend this script.
   ```
 
-  That is the tool working correctly, not a failure. On a mixed table, delete the
-  unstamped `doc_type`'s rows and re-embed that corpus with `--source-repo`.
+  That is the tool working correctly, not a failure. On a mixed table the fix is
+  to delete the unstamped `doc_type`'s rows and re-embed that corpus with
+  `--source-repo`.
 
 Whatever you re-run, re-run the checkers afterwards, and re-check
 `chips.yaml` if a new target has appeared upstream — its header records exactly

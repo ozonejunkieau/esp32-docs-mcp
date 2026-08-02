@@ -84,6 +84,13 @@ bitfields, timing. "Which function do I call" is `idf`; "what does bit 12 of thi
 register do" is `trm`. Omit it when you do not know, which is often the right
 choice — the two halves answer different aspects of the same question.
 
+> **Landing: a third corpus.** `src` is reserved for the ESP-IDF SoC headers —
+> the C definitions of the registers, bitmasks and capability macros the manuals
+> describe in prose — together with an `esp32_docs_find_symbol` tool for exact
+> identifier lookup. The `doc_type` value is already accepted; the corpus and
+> the tool are being finished. This section will say when to reach for each once
+> they land.
+
 **Set `chip` when the answer could differ per chip**, which for hardware is most
 of the time. It narrows to what is true for that chip *without* excluding general
 content: ESP-IDF chunks common to every target list every target, so they still
@@ -254,4 +261,6 @@ with `uv run validate_store.py`. Anything that opens the store with
 `mode="overwrite"` replaces it wholesale rather than adding to it — that is what
 `embed_and_store.py --overwrite` is for, and why the TRM ingest step deliberately
 omits the flag. There is no undo short of re-embedding, so confirm the row count
-before and after any write.
+before and after any write. The `just` recipes that can do this are guarded and
+prompt first — see
+[development.md](development.md#the-two-destructive-recipes).

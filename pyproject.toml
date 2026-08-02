@@ -32,3 +32,23 @@ dependencies = [
 Homepage = "https://github.com/ozonejunkieau/esp32-docs-mcp"
 Repository = "https://github.com/ozonejunkieau/esp32-docs-mcp"
 Issues = "https://github.com/ozonejunkieau/esp32-docs-mcp/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The modules under test live at the repo root (flat layout, no src/), so the
+# rootdir has to be importable. `importmode=importlib` with rootdir on the path
+# keeps that working without tests/__init__.py or a conftest sys.path hack.
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    # Tests needing a local corpus that a fresh clone does not have: the ESP-IDF
+    # Sphinx XML build ($IDF_PATH/docs/_build/en/<chip>/xml) or the TRM LaTeX
+    # checkout ($TRM_PATH / ./trm_latex). They skip with an explicit reason when
+    # the inputs are absent -- deselect with `-m 'not slow'` to skip them always.
+    "slow: requires a locally built corpus; minutes, not seconds",
+]
