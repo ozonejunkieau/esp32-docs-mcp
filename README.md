@@ -191,4 +191,40 @@ plainly:
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+The code in this repository is MIT — see [LICENSE](LICENSE).
+
+### Upstream licensing of the corpus
+
+**The licence above covers this software, not the documentation it indexes.**
+Building the corpus produces a store containing verbatim documentation text, so
+redistributing that store means redistributing Espressif's documentation under
+its own terms — not this project's.
+
+| Source | Licence |
+|---|---|
+| [ESP-IDF](https://github.com/espressif/esp-idf) documentation | Apache-2.0 |
+| [TRM LaTeX sources](https://github.com/espressif/esp-technical-reference-manual-latex) | **CC-BY-SA 4.0** (the repo's scripts are Apache-2.0) |
+
+The practical consequence is **CC-BY-SA is copyleft**. Roughly half the corpus —
+10,515 of 21,672 chunks — comes from the Technical Reference Manuals, so a built
+store carries a ShareAlike obligation and cannot simply be republished under a
+permissive licence. If you publish a store or a derived dataset:
+
+- Keep the two corpora as separate artifacts. A combined store is more readily
+  argued to be adapted material, where ShareAlike propagates; separable datasets
+  are more clearly a collection.
+- Licence the TRM artifact **CC-BY-SA 4.0** and the ESP-IDF artifact
+  **Apache-2.0**, each attributing Espressif and naming the upstream commit. The
+  store already records `source_version` and `source_commit` on every row, so the
+  exact provenance is available per chunk.
+- Preserve attribution and copyright notices in the indexed text. ESP-IDF's
+  `COPYRIGHT` document carries third-party attributions, including contributor
+  email addresses, that the Apache-2.0 and BSD terms require be retained — they
+  are not incidental content to strip.
+
+Nothing here is legal advice, and whether a mixed store counts as a collection or
+an adaptation turns on specifics. Get a real opinion before relying on it
+commercially.
+
+This project distributes no corpus. Everything is built locally from sources you
+obtain yourself, which is why there is no prebuilt index to download.

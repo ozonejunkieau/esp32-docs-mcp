@@ -35,6 +35,18 @@ last, and its input is reproducible.
 - **Disk:** the ESP-IDF docs build output, two JSONL corpora, and a LanceDB store
   of 21,672 vectors at 2560 dimensions each.
 
+## What you are producing, licence-wise
+
+The store holds verbatim documentation text, not just vectors, so it inherits the
+upstream terms: the ESP-IDF half is Apache-2.0, and the Technical Reference
+Manual half is **CC-BY-SA 4.0**. That second one is copyleft, so a store you
+build here is not yours to republish under a permissive licence.
+
+Building it for your own use is unencumbered. Distributing it — as a release
+asset, a shared volume, or a hosted index — means honouring ShareAlike and
+attribution. See [Upstream licensing](../README.md#upstream-licensing-of-the-corpus)
+before you publish anything derived from it.
+
 ## Prerequisites
 
 ### For the ESP-IDF half
