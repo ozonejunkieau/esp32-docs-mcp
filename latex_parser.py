@@ -1007,7 +1007,7 @@ def _render_environment(node: LatexEnvironmentNode) -> str:
     if name in ("longtable", "tabular", "tabularx"):
         return _render_table(node)
     if name == "register":
-        return _render_register(node)[1]
+        return _render_register(node)[1]  # text only; symbols are attached in _build_tree
     if name == "bytefield":
         # Instruction encodings and DMA descriptor layouts, always inside a
         # figure. Not a second register representation -- 31 uses repo-wide.
@@ -1113,13 +1113,27 @@ def register_symbols(name: str) -> list[str]:
     return list(dict.fromkeys(symbols))
 
 
-def _render_register(node: LatexEnvironmentNode) -> tuple[str, str]:
-    """Render a register environment to (register_name, text)."""
+# Bitfield labels worth indexing follow the C macro convention the SoC headers
+# also use -- I2C_SCL_LOW_PERIOD, PARL_IO_TX_VALID_OUTPUT_EN. The rest are prose
+# labels ("reserved", "ch_sel", "data", "A"): 2% of distinct names but the whole
+# of the reuse problem, since "reserved" alone appears 148 times and would match
+# a peripheral's worth of unrelated registers.
+_FIELD_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9_]{3,}$")
+
+
+def field_symbols(names: list[str]) -> list[str]:
+    """Bitfield names distinctive enough to be worth a symbol lookup."""
+    return list(dict.fromkeys(n for n in names if _FIELD_SYMBOL_RE.match(n) and n.lower() != "reserved"))
+
+
+def _render_register(node: LatexEnvironmentNode) -> tuple[str, str, list[str]]:
+    """Render a register environment to (register_name, text, field_names)."""
     args = node.nodeargd.argnlist if node.nodeargd else []
     name = _render_one_line(args[1]) if len(args) > 1 else "unknown"
     address = _render_one_line(args[2]) if len(args) > 2 else "unknown"
 
     field_lines = []
+    field_names: list[str] = []
     field_descs: dict[str, str] = {}
 
     for child in node.nodelist:
@@ -1138,6 +1152,7 @@ def _render_register(node: LatexEnvironmentNode) -> tuple[str, str]:
             except ValueError:
                 bits = ""
             field_lines.append(f"- {fname} {bits} reset={reset}")
+            field_names.append(fname)
         elif isinstance(child, LatexEnvironmentNode) and child.environmentname == "regdesc":
             for sub in child.nodelist:
                 if isinstance(sub, LatexEnvironmentNode) and sub.environmentname == "reglist":
@@ -1153,7 +1168,7 @@ def _render_register(node: LatexEnvironmentNode) -> tuple[str, str]:
             text_lines.append(f"{fname}: {desc}")
             text_lines.append("")
 
-    return name, "\n".join(text_lines).strip()
+    return name, "\n".join(text_lines).strip(), field_names
 
 
 def _parse_reglist_descriptions(nodelist) -> dict[str, str]:
@@ -1267,8 +1282,14 @@ def _build_tree(nodelist) -> SectionNode:
                 stack.append((level, child))
             elif isinstance(node, LatexEnvironmentNode) and node.environmentname == "register":
                 flush_prose()
-                reg_name, reg_text = _render_register(node)
-                add_block(reg_text, atomic=True, refs=Refs(symbol_refs=register_symbols(reg_name)))
+                reg_name, reg_text, reg_fields = _render_register(node)
+                # Register and bitfield names together: a caller with a field
+                # name from a header should reach the paragraph defining it.
+                add_block(
+                    reg_text,
+                    atomic=True,
+                    refs=Refs(symbol_refs=register_symbols(reg_name) + field_symbols(reg_fields)),
+                )
             elif isinstance(node, LatexEnvironmentNode) and node.environmentname in _TABLE_ENVIRONMENTS:
                 flush_prose()
                 add_block(_render_table(node))
