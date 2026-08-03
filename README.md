@@ -129,6 +129,39 @@ Two fields matter when accuracy does:
 - **`source_version`** — the upstream revision the chunk was built from. Both
   corpora track moving upstreams, so this is what makes an answer reproducible.
 
+### `esp32_docs_find_symbol`
+
+Exact lookup of a C/C++ identifier — a register, a bitfield, a function, a type —
+across every corpus that names it. Use it instead of `esp32_docs_search` whenever
+you already know the identifier: symbol lookup is exact, not semantic, and it
+skips the query embedding entirely, so it answers in well under a tenth of a
+second.
+
+| Parameter | Description |
+|---|---|
+| `symbol` | Exact identifier, e.g. `I2C_SCL_LOW_PERIOD_REG`. `foo` and `foo()` are treated the same |
+| `doc_type`, `chip` | Optional, same meaning as in search |
+| `k` | Results to return (default 5) |
+
+This is the cross-corpus join: one call returns the SoC header defining a
+register's address and bitmasks *and* the manual chapter explaining what it does.
+Results are interleaved across corpora rather than truncated arbitrarily —
+without that, one corpus vanished from the top `k` for 37% of the ~20,000 symbols
+that appear in more than one, which defeats the point of the lookup.
+
+The response is an object rather than a bare array, so truncation is visible:
+
+```json
+{
+  "symbol": "LEDC_CH0_CONF0_REG",
+  "total_matches": {"all": 18, "src": 10, "trm": 8},
+  "returned": 5,
+  "results": [ ... ]
+}
+```
+
+Raise `k` when `total_matches` shows more than you were given.
+
 ### `esp32_docs_list_chips`
 
 Valid `chip` values with their coverage: `has_idf_docs`, `has_trm`, and

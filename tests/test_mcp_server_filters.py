@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mcp_server import _build_where, _format_result, _list_field, _revision_scope
+from mcp_server import _interleave_by_corpus, _build_where, _format_result, _list_field, _revision_scope
 
 
 class TestBuildWhere:
@@ -295,3 +295,42 @@ class TestAgainstARealTable:
         assert result["revision_scope"] == "all published revisions (mainline, v1.3)"
         assert result["chips"] == []
         assert isinstance(result["relevance_distance"], float)
+
+
+class TestInterleaveByCorpus:
+    """An exact symbol lookup has no relevance score to truncate along.
+
+    LanceDB returns scan order, so a plain `limit(k)` yields whichever corpus the
+    storage layout happened to reach first. Measured over 200 symbols spanning
+    more than one corpus, that dropped a corpus entirely 37% of the time -- and
+    losing the manual's description of a register whose C definition is on screen
+    defeats the point of the tool.
+    """
+
+    @staticmethod
+    def _row(doc_type, chip, path, index=0):
+        return {"doc_type": doc_type, "chip": chip, "file_path": path, "chunk_index": index}
+
+    def test_every_corpus_survives_truncation(self):
+        rows = [self._row("src", "", f"h{i}.h") for i in range(10)]
+        rows += [self._row("trm", "esp32c3", f"c{i}") for i in range(8)]
+
+        picked = _interleave_by_corpus(rows, 5)
+
+        assert len(picked) == 5
+        assert {r["doc_type"] for r in picked} == {"src", "trm"}
+
+    def test_order_is_stable_so_rebuilds_do_not_reshuffle_answers(self):
+        rows = [self._row("trm", "esp32p4", "z"), self._row("src", "", "b.h"),
+                self._row("trm", "esp32c3", "a"), self._row("src", "", "a.h")]
+
+        first = _interleave_by_corpus(rows, 4)
+        shuffled = _interleave_by_corpus(list(reversed(rows)), 4)
+
+        assert [r["file_path"] for r in first] == [r["file_path"] for r in shuffled]
+
+    def test_a_single_corpus_is_not_padded_or_starved(self):
+        rows = [self._row("src", "", f"h{i}.h") for i in range(3)]
+
+        assert len(_interleave_by_corpus(rows, 5)) == 3
+        assert len(_interleave_by_corpus(rows, 2)) == 2

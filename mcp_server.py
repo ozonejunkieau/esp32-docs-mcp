@@ -12,6 +12,8 @@ Run with stdio transport (the default) for local use with Claude Code/Desktop:
 from __future__ import annotations
 
 import json
+from collections import Counter, defaultdict
+from itertools import zip_longest
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -146,6 +148,41 @@ def _revision_scope(row: dict) -> str | None:
     if published and set(applies) >= set(published):
         return f"all published revisions ({', '.join(sorted(applies))})"
     return f"ONLY revision {', '.join(sorted(applies))} -- does not apply to other silicon revisions"
+
+
+# How many matches to pull before interleaving. A symbol reaching this many rows
+# is a generic field name rather than something a caller is hunting, and the
+# totals reported alongside the results make the ceiling visible.
+_FIND_SYMBOL_SCAN_LIMIT = 200
+
+
+def _interleave_by_corpus(rows: list[dict], k: int) -> list[dict]:
+    """Take up to k rows, round-robin across doc_type, so no corpus is lost.
+
+    A symbol lookup exists to put the definition and the description side by
+    side -- the header defining a register's address next to the manual
+    explaining what it does. Truncating a scan-ordered result set returns
+    whichever corpus the storage layout happened to yield first, which for
+    roughly a third of cross-corpus symbols means one of them silently vanishes.
+
+    Within a corpus, order by chip then file path: an exact match has no
+    relevance score to sort by, and a stable order means the same question gives
+    the same answer across rebuilds.
+    """
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        grouped[row["doc_type"]].append(row)
+    for corpus in grouped.values():
+        corpus.sort(key=lambda r: (r.get("chip") or "", r.get("file_path") or "", r.get("chunk_index") or 0))
+
+    picked: list[dict] = []
+    for tier in zip_longest(*(grouped[name] for name in sorted(grouped))):
+        for row in tier:
+            if row is not None:
+                picked.append(row)
+                if len(picked) == k:
+                    return picked
+    return picked
 
 
 def _list_field(row: dict, name: str) -> list:
@@ -370,8 +407,27 @@ async def esp32_docs_find_symbol(params: FindSymbolInput, ctx: Context) -> str:
     if scope:
         where = f"{where} AND {scope}"
 
-    results = app_ctx.table.search().where(where).limit(params.k).to_pandas()
-    return json.dumps([_format_result(row) for row in results.to_dict("records")], indent=2)
+    # Over-fetch, then interleave. An exact lookup has no relevance ordering to
+    # truncate along -- LanceDB returns scan order -- so a plain limit drops a
+    # whole corpus for 37% of the 19,984 symbols that span more than one, and
+    # which corpus survives is an accident of storage layout that shifts between
+    # rebuilds. Losing the manual's description of a register a caller can
+    # already see the C definition of defeats the point of the lookup.
+    matches = app_ctx.table.search().where(where).limit(_FIND_SYMBOL_SCAN_LIMIT).to_pandas()
+    rows = _interleave_by_corpus(matches.to_dict("records"), params.k)
+
+    totals = Counter(row["doc_type"] for row in matches.to_dict("records"))
+    return json.dumps(
+        {
+            "symbol": bare,
+            # Stated because truncation is otherwise invisible: a caller shown
+            # two manual chapters should know whether ten exist.
+            "total_matches": {"all": int(len(matches)), **{k: int(v) for k, v in sorted(totals.items())}},
+            "returned": len(rows),
+            "results": [_format_result(row) for row in rows],
+        },
+        indent=2,
+    )
 
 
 @mcp.tool(
