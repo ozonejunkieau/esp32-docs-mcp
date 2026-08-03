@@ -68,6 +68,20 @@ re-embed for metadata.
 (4B is 2560, 8B 4096, 0.6B 1024) *and* recreating the table. LanceDB fixes the
 vector width at creation. Do it before an embedding run, never after.
 
+**Estimate embedding time from chunk *count*, not word count.** Measured 0.52
+chunks/s on ESP-IDF prose and 0.51 on the SoC header cards, despite very
+different chunk lengths — per-chunk overhead dominates, so roughly
+`chunks / 0.5` seconds. Scaling on total words underestimated a 2-hour run as 1
+hour. It also means chunk count is the lever: rendering register headers as
+cards rather than prose cut them from 28,652 to 2,754, and the saving is
+proportional to that ratio.
+
+**Metadata columns can be repaired without re-embedding.** Vectors can be read
+back and rewritten untouched, so a missing column is minutes rather than hours —
+see `backfill_provenance.py` and `backfill_trm_symbols.py`. Never re-embed for
+metadata. Write a verified backup before any delete-and-re-add, because a crash
+between the two costs the whole corpus.
+
 **`chips.yaml` tracks two independent coverage facts** — `idf_docs` and
 `trm_folder` — and neither implies the other. All 13 keys are real silicon
 matching `components/soc/`. Its header records exactly which upstream source

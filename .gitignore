@@ -44,6 +44,11 @@ esp_docs.lancedb/
 demo.lancedb/
 *.jsonl
 
+# Pre-change snapshots written by the backfill scripts. They contain embedding
+# vectors, so they are large and as un-committable as the store itself -- but
+# keep one until you have spot-checked the change it guarded.
+*.parquet
+
 # --- Local checkout symlink ---
 # Points at a TRM LaTeX clone by absolute path, so it is neither portable nor
 # free of the local username. Set TRM_PATH instead, or recreate the symlink.

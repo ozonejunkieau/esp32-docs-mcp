@@ -58,6 +58,7 @@ from chunking import (
     MIN_WORDS_PER_CHUNK,
     Block,
     RawChunk,
+    Refs,
     SectionNode,
     build_chunks,
     merge_undersized_chunks,
@@ -1074,6 +1075,44 @@ def _render_one_line(nodelist) -> str:
     return re.sub(r"\s*\n\s*", " ", _finalize(render_nodes(nodelist))).strip()
 
 
+# A parameterised register carries its index range in the rendered name:
+# "LEDC_CHn_CONF0_REG (n: 0-7)". The variable is a bare letter standing in for
+# the index, which is also embedded in the identifier itself.
+_REGISTER_RANGE_RE = re.compile(r"^(?P<name>\S+?)\s*\((?P<var>[A-Za-z])\s*:\s*(?P<lo>\d+)\s*[-~]\s*(?P<hi>\d+)\)\s*$")
+
+# Guards against a malformed range producing thousands of entries; real ranges
+# are channel/timer counts, comfortably inside this.
+_MAX_REGISTER_EXPANSION = 64
+
+
+def register_symbols(name: str) -> list[str]:
+    """Searchable identifiers for a register, expanding parameterised names.
+
+    The manuals write a bank of registers once, as "LEDC_CHn_CONF0_REG (n: 0-7)",
+    while the SoC headers define each member separately as LEDC_CH0_CONF0_REG and
+    so on. Storing only the manual's spelling means a symbol lookup for the name
+    a caller actually has -- the one in the header, or in their code -- misses the
+    manual describing it, which is exactly the cross-corpus join the search is
+    for. So emit both: the parameterised form for anyone quoting the manual, and
+    every concrete member.
+    """
+    if not name or name == "unknown":
+        return []
+
+    match = _REGISTER_RANGE_RE.match(name.strip())
+    if not match:
+        return [name.strip()]
+
+    base, var = match.group("name"), match.group("var")
+    lo, hi = int(match.group("lo")), int(match.group("hi"))
+    symbols = [base]
+    if 0 <= hi - lo < _MAX_REGISTER_EXPANSION and var in base:
+        # Replace only the index position, not every occurrence of the letter --
+        # "n" appears inside plenty of register names that are not the variable.
+        symbols += [base.replace(var, str(i), 1) for i in range(lo, hi + 1)]
+    return list(dict.fromkeys(symbols))
+
+
 def _render_register(node: LatexEnvironmentNode) -> tuple[str, str]:
     """Render a register environment to (register_name, text)."""
     args = node.nodeargd.argnlist if node.nodeargd else []
@@ -1205,10 +1244,10 @@ def _build_tree(nodelist) -> SectionNode:
     stack: list[tuple[int, SectionNode]] = [(-1, root)]
     prose_buffer: list = []
 
-    def add_block(rendered: str, *, atomic: bool = False) -> None:
+    def add_block(rendered: str, *, atomic: bool = False, refs: Refs | None = None) -> None:
         rendered = _finalize(rendered)
         if rendered:
-            stack[-1][1].blocks.append(Block(text=rendered, atomic=atomic))
+            stack[-1][1].blocks.append(Block(text=rendered, atomic=atomic, refs=refs or Refs()))
 
     def flush_prose() -> None:
         # One Block per run of prose between structural elements, so the
@@ -1228,7 +1267,8 @@ def _build_tree(nodelist) -> SectionNode:
                 stack.append((level, child))
             elif isinstance(node, LatexEnvironmentNode) and node.environmentname == "register":
                 flush_prose()
-                add_block(_render_register(node)[1], atomic=True)
+                reg_name, reg_text = _render_register(node)
+                add_block(reg_text, atomic=True, refs=Refs(symbol_refs=register_symbols(reg_name)))
             elif isinstance(node, LatexEnvironmentNode) and node.environmentname in _TABLE_ENVIRONMENTS:
                 flush_prose()
                 add_block(_render_table(node))
