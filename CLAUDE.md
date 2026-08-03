@@ -172,8 +172,8 @@ casually: it is hours.
 
 ## Current state
 
-The store at `./esp_docs.lancedb` holds **21,672 rows — 11,157 ESP-IDF and
-10,515 TRM**, across 807 unique source files, with the search round-trip
+The store at `./esp_docs.lancedb` holds **25,362 rows — 11,157 ESP-IDF, 10,515
+TRM and 3,690 SoC-header chunks**.
 passing.
 
 **ESP-IDF half:** all nine targets built and deduplicated. 3,168 pages → 43,274
@@ -186,19 +186,27 @@ registers recovered from source, 0 thin files, 90% median word capture, at
 revisions, 162 mainline-only, 142 v1.3-only, and `revision_scope` is verified
 reading correctly through the real `esp32_docs_search` query path.
 
-**A third corpus is landing.** `ingest_source.py` chunks the ESP-IDF SoC headers
-under `components/soc/` as `doc_type = "src"` — the C counterpart to the TRM,
-where the manual describes a register and the header defines its address and
-bitmasks. `schema.py` and `mcp_server.py` already carry `"src"` as a valid
-`doc_type`, and an `esp32_docs_find_symbol` tool for exact symbol lookup is in
-progress. `src` rows are chip-scoped through the `chips` **list**, like ESP-IDF
-rows, and carry no `revisions`.
+**Three corpora, 25,362 rows**: 11,157 `idf`, 10,515 `trm`, 3,690 `src`.
+`ingest_source.py` chunks the ESP-IDF SoC headers under `components/soc/` as
+`doc_type = "src"` — the C counterpart to the TRM, where the manual describes a
+register and the header defines its address and bitmasks. Register headers are
+one card per file, not full text: as prose they measure 28,652 chunks nobody
+retrieves semantically, against 2,754 as cards for the same `symbol_refs`
+coverage. `src` rows are chip-scoped through the `chips` **list** like ESP-IDF
+rows; ESP32-P4's also carry `revisions`, because IDF splits those headers by
+silicon revision as the manuals do.
 
-> **To be written up once those land:** a `src` section in
-> [building-the-corpus.md](docs/building-the-corpus.md), the tool's parameters
-> in [README.md](README.md) and [usage.md](docs/usage.md), and whatever `just`
-> recipes accompany it. Do not describe the corpus's size or coverage from
-> memory — measure it.
+`esp32_docs_find_symbol` does exact identifier lookup with no embedding, and
+interleaves results across corpora — an exact match has no relevance score, so a
+plain `limit(k)` dropped a whole corpus for 37% of the ~20,000 symbols spanning
+more than one.
+
+Cross-corpus coverage is measured, not assumed: `just check-src-registers`
+reports the share of TRM register names resolving to a `#define` in the matching
+chip's headers, currently **78.3%**. The residual is upstream divergence
+(`PWM_*` against `MCPWM_*`, no `twai_reg.h` for esp32/esp32s2), not lost
+extraction. A collapse there means symbol extraction broke, which no chunk count
+would reveal.
 
 ## File map
 

@@ -4,8 +4,7 @@ There is no prebuilt index to download. The store is derived data — every row
 records the upstream commit it came from — so building it locally is what makes
 it trustworthy rather than merely available.
 
-Two independent pipelines write into one LanceDB table (a third, for the ESP-IDF
-SoC headers, is [landing](#a-third-corpus-esp-idf-soc-headers)):
+Three independent pipelines write into one LanceDB table:
 
 ```
 ESP-IDF repo ──build_idf_docs.sh──▶ Sphinx XML (per target)
@@ -17,6 +16,7 @@ ESP-IDF repo ──build_idf_docs.sh──▶ Sphinx XML (per target)
                                  idf_chunks.jsonl ──┐
                                                     │ embed_and_store.py
 TRM LaTeX repo ──ingest_trm.py──▶ trm_chunks.jsonl ─┤
+ESP-IDF soc/ ──ingest_source.py──▶ src_chunks.jsonl ─┤
                                                     ▼
                                             esp_docs.lancedb ◀── mcp_server.py
 ```
@@ -39,8 +39,8 @@ guards on the two destructive ones.
 - **Embedding: hours.** Measured throughput for the 4B model on this corpus is
   0.52 chunks/s, which length-sorted batching brings to around three hours for
   the ESP-IDF half. Start it when you do not need the machine.
-- **Disk:** the ESP-IDF docs build output, two JSONL corpora, and a LanceDB store
-  of 21,672 vectors at 2560 dimensions each.
+- **Disk:** the ESP-IDF docs build output, three JSONL corpora, and a LanceDB
+  store of 25,362 vectors at 2560 dimensions each (~716 MB).
 
 ## What you are producing, licence-wise
 
@@ -151,13 +151,37 @@ chunks common to both revisions, 162 mainline-only and 142 v1.3-only.
 a register and the header *defines* its address and bitmasks. It reads
 `$IDF_PATH` (falling back to `~/git/esp-idf`) and writes JSONL like the other
 two ingests, so it embeds through the same `embed_and_store.py`. `src` rows are
-chip-scoped through the `chips` **list**, like ESP-IDF rows, and carry no
-`revisions`.
+chip-scoped through the `chips` **list**, like ESP-IDF rows. Most carry no
+`revisions`, but ESP32-P4's do: IDF splits its register headers by silicon
+revision exactly as the manuals do.
 
-> **Not yet documented here.** The scope flags, their measured cost, and the
-> matching `just` recipes are pending — see `uv run ingest_source.py --help` and
-> the module docstring in the meantime. Do not quote a corpus size for it from
-> memory; measure it.
+```bash
+uv run ingest_source.py ingest --out-path src_chunks.jsonl \
+    --idf-path "$IDF_PATH"                                                # just chunk-src
+uv run embed_and_store.py src_chunks.jsonl --doc-type src \
+    --source-repo "$IDF_PATH"                                             # just embed-src
+```
+
+**No `--overwrite`** — `src` rows append alongside the other two corpora.
+
+Current output: **3,690 chunks** from 2,036 files, about two hours to embed.
+
+Register headers are ingested as **one card per file** — path, leading comment,
+declared symbols — rather than as full text. Chunking them as prose measures
+28,652 chunks of `#define` walls that nobody retrieves semantically; cards give
+the same `symbol_refs` coverage for 2,754. `--no-registers` drops them entirely,
+at the cost of TRM register resolution falling from 78.3% to 1.8%.
+
+That 78.3% is the check worth running (`just check-src-registers`): it measures
+how many register names the manuals document actually resolve to a `#define` in
+the matching chip's headers. A collapse there means symbol extraction broke, and
+no chunk count would show it.
+
+Note the headers moved upstream — ESP-IDF v6.x relocated them from
+`components/soc/*/include/soc/` to `register/soc/`, and ESP32-P4 splits further
+into `hw_ver1`/`hw_ver3`, which map to the manuals' `v1.3`/`mainline`. Scoping to
+the old path yields 1.8% and looks like a broken parser rather than a moved
+directory, so re-check after any ESP-IDF upgrade.
 
 ## Verify before you trust it
 

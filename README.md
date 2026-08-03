@@ -8,8 +8,9 @@ Manuals while it works.
 Everything runs locally. Embeddings are computed on-device with MLX (Apple
 Silicon) and stored in LanceDB; no documentation or query text leaves the machine.
 
-The current corpus is **21,672 chunks — 11,157 from ESP-IDF across nine build
-targets, 10,515 from ten Technical Reference Manuals.**
+The current corpus is **25,362 chunks** — 11,157 from ESP-IDF across nine build
+targets, 10,515 from ten Technical Reference Manuals, and 3,690 from the SoC
+headers that define the registers those manuals describe.
 
 ## Why this exists
 
@@ -109,7 +110,7 @@ the results.
 | Parameter | Description |
 |---|---|
 | `query` | Natural-language query, e.g. "how does I2S clock configuration work" |
-| `doc_type` | `trm`, `idf`, or omit for both. A third value, `src`, is reserved for the ESP-IDF SoC-header corpus that is landing |
+| `doc_type` | `trm` (manuals), `idf` (guides and API reference), `src` (SoC headers), or omit for all three |
 | `chip` | e.g. `esp32p4`. Narrows to what's true for that chip; content common to all chips still matches |
 | `revision` | Silicon revision, e.g. `v1.3` or `mainline`. Narrows any content that has a revision — the manuals, and ESP32-P4's SoC register headers. Content without one is unaffected. Omit to see every revision |
 | `k` | Results to return (1–20, default 5) |
@@ -170,8 +171,8 @@ Technical Reference Manual but no per-chip docs build, or the reverse.
 
 ## Status and limitations
 
-Both pipelines work end to end and the store is populated. Known limits, stated
-plainly:
+All three pipelines work end to end and the store is populated. Known limits,
+stated plainly:
 
 - **Apple Silicon only.** Embedding goes through MLX. Nothing else is
   platform-specific, but there is no fallback backend.
@@ -249,7 +250,7 @@ its own terms — not this project's.
 | [TRM LaTeX sources](https://github.com/espressif/esp-technical-reference-manual-latex) | **CC-BY-SA 4.0** (the repo's scripts are Apache-2.0) |
 
 The practical consequence is **CC-BY-SA is copyleft**. Roughly half the corpus —
-10,515 of 21,672 chunks — comes from the Technical Reference Manuals, so a built
+10,515 of 25,362 chunks — comes from the Technical Reference Manuals, so a built
 store carries a ShareAlike obligation and cannot simply be republished under a
 permissive licence. If you publish a store or a derived dataset:
 

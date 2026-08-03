@@ -84,12 +84,20 @@ bitfields, timing. "Which function do I call" is `idf`; "what does bit 12 of thi
 register do" is `trm`. Omit it when you do not know, which is often the right
 choice — the two halves answer different aspects of the same question.
 
-> **Landing: a third corpus.** `src` is reserved for the ESP-IDF SoC headers —
-> the C definitions of the registers, bitmasks and capability macros the manuals
-> describe in prose — together with an `esp32_docs_find_symbol` tool for exact
-> identifier lookup. The `doc_type` value is already accepted; the corpus and
-> the tool are being finished. This section will say when to reach for each once
-> they land.
+`src` is the third register of language: the C definitions of the registers,
+bitmasks and capability macros the manuals describe in prose. "What is this
+register's address and which bits do what" is `src`; "why would I set that bit"
+is `trm`.
+
+**Reach for `esp32_docs_find_symbol` whenever you already know the identifier.**
+Semantic search finds text that reads similarly; a symbol lookup finds text that
+actually names the thing. Asking `esp32_docs_search` for `LEDC_CH0_CONF0_REG`
+returns chunks about LEDC configuration generally, while `find_symbol` returns
+the header defining it and the manual chapter describing it, in one call and
+without an embedding — under a tenth of a second.
+
+It reports per-corpus totals alongside the results, so if you are shown two
+manual chapters and `total_matches` says eight exist, raise `k`.
 
 **Set `chip` when the answer could differ per chip**, which for hardware is most
 of the time. It narrows to what is true for that chip *without* excluding general
